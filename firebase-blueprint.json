@@ -1,0 +1,445 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authorized UNSCRIPTED administrator account record.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "photoURL": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Wedding content creator inquiry and confirmed booking record.",
+      "type": "object",
+      "properties": {
+        "bookingCode": { "type": "string", "pattern": "^UNSC-[0-9]{6}-[A-Z0-9]{4}$", "maxLength": 32 },
+        "coupleName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "whatsappNumber": { "type": "string", "minLength": 8, "maxLength": 25, "pattern": "^[0-9+\\-\\s()]{8,25}$" },
+        "normalizedWhatsapp": { "type": "string", "minLength": 8, "maxLength": 20, "pattern": "^[0-9]{8,20}$" },
+        "email": { "type": "string", "maxLength": 254 },
+        "eventDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "eventLocation": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "eventType": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "packageId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "packageName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "packagePrice": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 1500 },
+        "status": {
+          "type": "string",
+          "enum": ["NEW_INQUIRY", "CONTACTED", "WAITING_CONFIRMATION", "CONFIRMED", "COMPLETED", "CANCELLED"]
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["UNPAID", "DP_PAID", "PARTIALLY_PAID", "FULLY_PAID", "REFUNDED"]
+        },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "source": { "type": "string", "enum": ["PUBLIC_WEB", "ADMIN_MANUAL"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "bookingCode",
+        "coupleName",
+        "whatsappNumber",
+        "normalizedWhatsapp",
+        "eventDate",
+        "eventLocation",
+        "eventType",
+        "packageId",
+        "packageName",
+        "packagePrice",
+        "status",
+        "paymentStatus",
+        "source",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Deduplicated client record keyed or indexed by normalized WhatsApp number.",
+      "type": "object",
+      "properties": {
+        "coupleName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "whatsappNumber": { "type": "string", "minLength": 8, "maxLength": 25 },
+        "normalizedWhatsapp": { "type": "string", "minLength": 8, "maxLength": 20, "pattern": "^[0-9]{8,20}$" },
+        "email": { "type": "string", "maxLength": 254 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "totalBookings": { "type": "number" },
+        "lastBookingDate": { "type": "string", "maxLength": 10 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coupleName", "whatsappNumber", "normalizedWhatsapp", "totalBookings", "createdAt", "updatedAt"]
+    },
+    "ServicePackage": {
+      "title": "ServicePackage",
+      "description": "Editable wedding content creator service tier managed by admin.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "slug": { "type": "string", "minLength": 2, "maxLength": 80, "pattern": "^[a-z0-9\\-]+$" },
+        "price": { "type": "number" },
+        "tagline": { "type": "string", "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 1500 },
+        "coverageDetails": { "type": "string", "maxLength": 1000 },
+        "deliverables": { "type": "array", "description": "Editable list of deliverables (max 20 items)" },
+        "additionalNotes": { "type": "string", "maxLength": 1000 },
+        "isActive": { "type": "boolean" },
+        "isFeatured": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "price", "description", "deliverables", "isActive", "isFeatured", "sortOrder", "createdAt", "updatedAt"]
+    },
+    "PortfolioItem": {
+      "title": "PortfolioItem",
+      "description": "Published or draft wedding story showcase item.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string", "minLength": 2, "maxLength": 120, "pattern": "^[a-z0-9\\-]+$" },
+        "coupleName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "eventDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "location": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "eventType": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "summary": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "description": { "type": "string", "minLength": 2, "maxLength": 3000 },
+        "coverImage": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "mediaItems": { "type": "array", "description": "Up to 12 photo/video gallery media objects" },
+        "published": { "type": "boolean" },
+        "featured": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "slug",
+        "coupleName",
+        "eventDate",
+        "location",
+        "eventType",
+        "summary",
+        "description",
+        "coverImage",
+        "mediaItems",
+        "published",
+        "featured",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AvailabilityEntry": {
+      "title": "AvailabilityEntry",
+      "description": "Date availability marker keyed by YYYY-MM-DD.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "status": { "type": "string", "enum": ["AVAILABLE", "LIMITED", "BOOKED", "BLOCKED"] },
+        "note": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "status", "updatedAt"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Publicly readable brand, contact, and editorial copy configuration.",
+      "type": "object",
+      "properties": {
+        "brandName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "tagline": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "whatsappNumber": { "type": "string", "minLength": 8, "maxLength": 25 },
+        "instagramHandle": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "instagramUrl": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "whatsappTemplate": { "type": "string", "maxLength": 800 },
+        "tiktokUrl": { "type": "string", "maxLength": 300 },
+        "youtubeUrl": { "type": "string", "maxLength": 300 },
+        "email": { "type": "string", "maxLength": 254 },
+        "serviceArea": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "heroHeadline": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "heroSubheadline": { "type": "string", "minLength": 2, "maxLength": 500 },
+        "aboutStatement": { "type": "string", "minLength": 2, "maxLength": 1200 },
+        "bookingNotice": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "brandName",
+        "tagline",
+        "whatsappNumber",
+        "instagramHandle",
+        "instagramUrl",
+        "serviceArea",
+        "heroHeadline",
+        "heroSubheadline",
+        "aboutStatement",
+        "updatedAt"
+      ]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit log of administrative changes and booking events.",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "entityType": {
+          "type": "string",
+          "enum": ["BOOKING", "PORTFOLIO", "PACKAGE", "CUSTOMER", "SETTINGS", "AVAILABILITY", "COUPLE_NOTE", "HOMEPAGE", "INVOICE"]
+        },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 2, "maxLength": 300 },
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 254 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "entityType", "entityId", "summary", "actorUid", "actorEmail", "createdAt"]
+    },
+    "CoupleNote": {
+      "title": "CoupleNote",
+      "description": "Published or draft couple testimonial/note displayed on the public website and managed in Admin.",
+      "type": "object",
+      "properties": {
+        "coupleName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "weddingDetails": { "type": "string", "minLength": 2, "maxLength": 160 },
+        "note": { "type": "string", "minLength": 2, "maxLength": 1000 },
+        "description": { "type": "string", "maxLength": 1500 },
+        "tag": { "type": "string", "maxLength": 60 },
+        "published": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coupleName", "weddingDetails", "note", "published", "sortOrder", "createdAt", "updatedAt"]
+    },
+    "HomepageConfig": {
+      "title": "HomepageConfig",
+      "description": "Draft or published homepage customization configuration (Hero, Gallery, About, Featured Portfolio IDs, CTA).",
+      "type": "object",
+      "properties": {
+        "heroTitle": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "heroSubtitle": { "type": "string", "minLength": 2, "maxLength": 500 },
+        "heroImageUrl": { "type": "string", "maxLength": 2000 },
+        "heroImageAlt": { "type": "string", "maxLength": 200 },
+        "heroImagePosition": { "type": "object", "description": "Focal point { x: 0..100, y: 0..100 }" },
+        "heroCaption": { "type": "string", "maxLength": 200 },
+        "heroPrimaryCtaLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "heroSecondaryCtaLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "gallerySectionEnabled": { "type": "boolean" },
+        "galleryItems": { "type": "array", "description": "Up to 16 curated homepage gallery images" },
+        "aboutEyebrow": { "type": "string", "maxLength": 80 },
+        "aboutHeadline": { "type": "string", "minLength": 2, "maxLength": 240 },
+        "aboutText": { "type": "string", "minLength": 2, "maxLength": 1200 },
+        "aboutImageUrl": { "type": "string", "maxLength": 2000 },
+        "aboutImageAlt": { "type": "string", "maxLength": 200 },
+        "aboutCtaLabel": { "type": "string", "maxLength": 80 },
+        "featuredPortfolioIds": { "type": "array", "description": "Up to 6 selected portfolio document IDs" },
+        "ctaEyebrow": { "type": "string", "maxLength": 80 },
+        "ctaHeadline": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "ctaSubtext": { "type": "string", "maxLength": 400 },
+        "ctaButtonLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "updatedBy": { "type": "string", "maxLength": 254 },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "heroTitle",
+        "heroSubtitle",
+        "heroImageUrl",
+        "heroImagePosition",
+        "heroPrimaryCtaLabel",
+        "heroSecondaryCtaLabel",
+        "gallerySectionEnabled",
+        "galleryItems",
+        "aboutHeadline",
+        "aboutText",
+        "featuredPortfolioIds",
+        "ctaHeadline",
+        "ctaButtonLabel",
+        "updatedAt"
+      ]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Wedding content creator invoice generated from a booking with sequential numbering, package integration, payment history, and draft/finalized locking.",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": { "type": "string", "pattern": "^INV/USC/[0-9]{4}/[0-9]{3,}$", "maxLength": 40 },
+        "sequenceYear": { "type": "number" },
+        "sequenceNumber": { "type": "number" },
+        "bookingId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "bookingCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "lifecycleStatus": { "type": "string", "enum": ["DRAFT", "FINALIZED", "VOID"] },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PARTIALLY_PAID", "PAID", "OVERDUE"] },
+        "issueDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "dueDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "clientName": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "clientWhatsapp": { "type": "string", "minLength": 8, "maxLength": 25 },
+        "normalizedWhatsapp": { "type": "string", "minLength": 8, "maxLength": 20 },
+        "clientEmail": { "type": "string", "maxLength": 254 },
+        "weddingDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "maxLength": 10 },
+        "eventLocation": { "type": "string", "minLength": 2, "maxLength": 180 },
+        "eventType": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "packageId": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "packageName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "packagePrice": { "type": "number" },
+        "additionalItems": { "type": "array", "description": "Up to 20 additional service line items" },
+        "additionalServicesTotal": { "type": "number" },
+        "transportationFee": { "type": "number" },
+        "overtimeFee": { "type": "number" },
+        "discount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "dpMode": { "type": "string", "enum": ["PERCENT_30", "PERCENT_50", "CUSTOM_PERCENT", "CUSTOM_AMOUNT"] },
+        "dpPercent": { "type": "number" },
+        "downPaymentAmount": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "remainingBalance": { "type": "number" },
+        "payments": { "type": "array", "description": "Up to 30 recorded payment transactions" },
+        "bankName": { "type": "string", "maxLength": 80 },
+        "bankAccountNumber": { "type": "string", "maxLength": 60 },
+        "bankAccountHolder": { "type": "string", "maxLength": 120 },
+        "paymentInstructions": { "type": "string", "maxLength": 600 },
+        "thankYouMessage": { "type": "string", "maxLength": 400 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "finalizedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "invoiceNumber",
+        "sequenceYear",
+        "sequenceNumber",
+        "bookingId",
+        "bookingCode",
+        "lifecycleStatus",
+        "paymentStatus",
+        "issueDate",
+        "dueDate",
+        "clientName",
+        "clientWhatsapp",
+        "normalizedWhatsapp",
+        "weddingDate",
+        "eventLocation",
+        "eventType",
+        "packageId",
+        "packageName",
+        "packagePrice",
+        "additionalItems",
+        "additionalServicesTotal",
+        "transportationFee",
+        "overtimeFee",
+        "discount",
+        "grandTotal",
+        "dpMode",
+        "dpPercent",
+        "downPaymentAmount",
+        "amountPaid",
+        "remainingBalance",
+        "payments",
+        "bankName",
+        "bankAccountNumber",
+        "bankAccountHolder",
+        "paymentInstructions",
+        "thankYouMessage",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "InvoiceCounter": {
+      "title": "InvoiceCounter",
+      "description": "Atomic annual sequence counter preventing duplicate INV/USC/YYYY/NNN numbers.",
+      "type": "object",
+      "properties": {
+        "year": { "type": "number" },
+        "lastNumber": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "lastNumber", "updatedAt"]
+    },
+    "InvoiceSettings": {
+      "title": "InvoiceSettings",
+      "description": "Admin-configurable bank account details, payment instructions, and default invoice terms.",
+      "type": "object",
+      "properties": {
+        "bankName": { "type": "string", "maxLength": 80 },
+        "bankAccountNumber": { "type": "string", "maxLength": 60 },
+        "bankAccountHolder": { "type": "string", "maxLength": 120 },
+        "paymentInstructions": { "type": "string", "maxLength": 600 },
+        "defaultThankYouMessage": { "type": "string", "maxLength": 400 },
+        "defaultDueDays": { "type": "number" },
+        "defaultDpMode": { "type": "string", "enum": ["PERCENT_30", "PERCENT_50"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "bankName",
+        "bankAccountNumber",
+        "bankAccountHolder",
+        "paymentInstructions",
+        "defaultThankYouMessage",
+        "defaultDueDays",
+        "defaultDpMode",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Admin user profiles and role records."
+    },
+    "/bookings/{bookingId}": {
+      "schema": { "$ref": "#/entities/Booking" },
+      "description": "Customer wedding inquiries and managed bookings."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Deduplicated customer directory accessible strictly to admin."
+    },
+    "/packages/{packageId}": {
+      "schema": { "$ref": "#/entities/ServicePackage" },
+      "description": "Service packages (publicly readable only when isActive is true)."
+    },
+    "/portfolio/{portfolioId}": {
+      "schema": { "$ref": "#/entities/PortfolioItem" },
+      "description": "Portfolio stories (publicly readable only when published is true)."
+    },
+    "/availability/{dateId}": {
+      "schema": { "$ref": "#/entities/AvailabilityEntry" },
+      "description": "Publicly readable date availability schedule without PII."
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Public site configuration stored at settings/public."
+    },
+    "/activity_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Immutable admin audit logs."
+    },
+    "/couple_notes/{noteId}": {
+      "schema": { "$ref": "#/entities/CoupleNote" },
+      "description": "Couple notes / testimonials (publicly readable only when published is true)."
+    },
+    "/homepage_config/{docId}": {
+      "schema": { "$ref": "#/entities/HomepageConfig" },
+      "description": "Draft (admin-only) and published (publicly readable) homepage customization documents."
+    },
+    "/invoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/Invoice" },
+      "description": "Admin-managed client wedding invoices with finalized snapshot preservation."
+    },
+    "/invoice_counters/{yearId}": {
+      "schema": { "$ref": "#/entities/InvoiceCounter" },
+      "description": "Atomic annual invoice sequence counters keyed by 4-digit year."
+    },
+    "/invoice_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/InvoiceSettings" },
+      "description": "Admin-only bank details, payment instructions, and default invoice copy stored at invoice_settings/default."
+    }
+  }
+}

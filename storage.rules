@@ -1,0 +1,52 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid is string
+        && request.auth.token.email_verified == true
+        && (
+          ('admin' in request.auth.token && request.auth.token.admin == true) ||
+          (
+            request.auth.token.email is string &&
+            request.auth.token.email.lower() in [
+              'syehansf@gmail.com',
+              'unscriptedwcc29@gmail.com'
+            ]
+          )
+        );
+    }
+
+    // Public portfolio media (read-only publicly, admin-only upload with size/type limits)
+    match /portfolio/{allMedia=**} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource != null
+        && request.resource.size <= 25 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType.matches('video/.*')
+        );
+      allow delete: if isAdmin();
+    }
+
+    // Homepage customization images (hero, gallery, about)
+    match /homepage/{allMedia=**} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource != null
+        && request.resource.size <= 15 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isAdmin();
+    }
+
+    // Private customer documents (never publicly readable)
+    match /private_documents/{allDocs=**} {
+      allow read, write, delete: if isAdmin();
+    }
+  }
+}

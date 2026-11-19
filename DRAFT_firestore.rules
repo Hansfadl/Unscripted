@@ -1,0 +1,759 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Primitives ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+    }
+
+    function isValidBookingCode(code) {
+      return code is string && code.size() == 16 && code.matches('^UNSC-[0-9]{6}-[A-Z0-9]{4}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid is string && request.auth.uid.size() >= 1;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function isAllowlistedAdminEmail() {
+      return isVerifiedUser()
+        && request.auth.token.email.lower() in [
+          'syehansf@gmail.com',
+          'unscriptedwcc29@gmail.com'
+        ];
+    }
+
+    function isClaimedAdmin() {
+      return isVerifiedUser()
+        && ('admin' in request.auth.token && request.auth.token.admin == true);
+    }
+
+    function isRegisteredAdminUserDoc() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uid is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email.lower() == request.auth.token.email.lower();
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        isAllowlistedAdminEmail() ||
+        isClaimedAdmin() ||
+        isRegisteredAdminUserDoc()
+      );
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'photoURL', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role == 'admin'
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBookingShape(data) {
+      return data.keys().hasAll([
+          'bookingCode', 'coupleName', 'whatsappNumber', 'normalizedWhatsapp',
+          'eventDate', 'eventLocation', 'eventType', 'packageId', 'packageName',
+          'packagePrice', 'status', 'paymentStatus', 'source', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'bookingCode', 'coupleName', 'whatsappNumber', 'normalizedWhatsapp',
+          'email', 'eventDate', 'eventLocation', 'eventType', 'packageId',
+          'packageName', 'packagePrice', 'amountPaid', 'notes', 'status',
+          'paymentStatus', 'customerId', 'source', 'createdAt', 'updatedAt'
+        ])
+        && isValidBookingCode(data.bookingCode)
+        && data.coupleName is string && data.coupleName.size() >= 2 && data.coupleName.size() <= 120
+        && data.whatsappNumber is string && data.whatsappNumber.size() >= 8 && data.whatsappNumber.size() <= 25
+        && data.whatsappNumber.matches('^[0-9+\\-\\s()]{8,25}$')
+        && data.normalizedWhatsapp is string && data.normalizedWhatsapp.size() >= 8 && data.normalizedWhatsapp.size() <= 20
+        && data.normalizedWhatsapp.matches('^[0-9]{8,20}$')
+        && (!('email' in data) || (data.email is string && data.email.size() <= 254))
+        && isValidDateStr(data.eventDate)
+        && data.eventLocation is string && data.eventLocation.size() >= 2 && data.eventLocation.size() <= 180
+        && data.eventType is string && data.eventType.size() >= 2 && data.eventType.size() <= 80
+        && isValidId(data.packageId) && data.packageId.size() <= 64
+        && data.packageName is string && data.packageName.size() >= 1 && data.packageName.size() <= 80
+        && data.packagePrice is number && data.packagePrice >= 0 && data.packagePrice <= 1000000000
+        && (!('amountPaid' in data) || (data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= 1000000000))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1500))
+        && data.status in ['NEW_INQUIRY', 'CONTACTED', 'WAITING_CONFIRMATION', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
+        && data.paymentStatus in ['UNPAID', 'DP_PAID', 'PARTIALLY_PAID', 'FULLY_PAID', 'REFUNDED']
+        && (!('customerId' in data) || (data.customerId is string && data.customerId.size() <= 128))
+        && data.source in ['PUBLIC_WEB', 'ADMIN_MANUAL']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicBookingCreate(data, bookingId) {
+      return isValidBookingShape(data)
+        && data.bookingCode == bookingId
+        && data.status == 'NEW_INQUIRY'
+        && data.paymentStatus == 'UNPAID'
+        && data.source == 'PUBLIC_WEB'
+        && (!('amountPaid' in data) || data.amountPaid == 0)
+        && !('customerId' in data)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && (
+          exists(/databases/$(database)/documents/packages/$(data.packageId))
+            ? (
+                get(/databases/$(database)/documents/packages/$(data.packageId)).data.isActive == true &&
+                get(/databases/$(database)/documents/packages/$(data.packageId)).data.price == data.packagePrice
+              )
+            : (
+                data.packageId in ['ceremony', 'story', 'full-story'] &&
+                (
+                  (data.packageId == 'ceremony' && data.packagePrice == 399000) ||
+                  (data.packageId == 'story' && data.packagePrice == 599000) ||
+                  (data.packageId == 'full-story' && data.packagePrice == 799000)
+                )
+              )
+        );
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll([
+          'coupleName', 'whatsappNumber', 'normalizedWhatsapp',
+          'totalBookings', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'coupleName', 'whatsappNumber', 'normalizedWhatsapp',
+          'email', 'notes', 'totalBookings', 'lastBookingDate',
+          'createdAt', 'updatedAt'
+        ])
+        && data.coupleName is string && data.coupleName.size() >= 2 && data.coupleName.size() <= 120
+        && data.whatsappNumber is string && data.whatsappNumber.size() >= 8 && data.whatsappNumber.size() <= 25
+        && data.normalizedWhatsapp is string && data.normalizedWhatsapp.size() >= 8 && data.normalizedWhatsapp.size() <= 20
+        && data.normalizedWhatsapp.matches('^[0-9]{8,20}$')
+        && (!('email' in data) || (data.email is string && data.email.size() <= 254))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000))
+        && data.totalBookings is number && data.totalBookings >= 0
+        && (!('lastBookingDate' in data) || (data.lastBookingDate is string && data.lastBookingDate.size() <= 10))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPackage(data) {
+      return data.keys().hasAll([
+          'name', 'slug', 'price', 'description', 'deliverables',
+          'isActive', 'isFeatured', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'name', 'slug', 'price', 'tagline', 'description',
+          'coverageDetails', 'deliverables', 'additionalNotes',
+          'isActive', 'isFeatured', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 80 && data.slug.matches('^[a-z0-9\\-]+$')
+        && data.price is number && data.price >= 0 && data.price <= 1000000000
+        && (!('tagline' in data) || (data.tagline is string && data.tagline.size() <= 160))
+        && data.description is string && data.description.size() <= 1500
+        && (!('coverageDetails' in data) || (data.coverageDetails is string && data.coverageDetails.size() <= 1000))
+        && data.deliverables is list && data.deliverables.size() <= 20
+        && (data.deliverables.size() == 0 || (data.deliverables[0] is string && data.deliverables[0].size() <= 200))
+        && (!('additionalNotes' in data) || (data.additionalNotes is string && data.additionalNotes.size() <= 1000))
+        && data.isActive is bool
+        && data.isFeatured is bool
+        && data.sortOrder is number
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPortfolio(data) {
+      return data.keys().hasAll([
+          'slug', 'coupleName', 'eventDate', 'location', 'eventType',
+          'summary', 'description', 'coverImage', 'mediaItems',
+          'published', 'featured', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'slug', 'coupleName', 'eventDate', 'location', 'eventType',
+          'summary', 'description', 'coverImage', 'mediaItems',
+          'published', 'featured', 'createdAt', 'updatedAt'
+        ])
+        && data.slug is string && data.slug.size() >= 2 && data.slug.size() <= 120 && data.slug.matches('^[a-z0-9\\-]+$')
+        && data.coupleName is string && data.coupleName.size() >= 2 && data.coupleName.size() <= 120
+        && isValidDateStr(data.eventDate)
+        && data.location is string && data.location.size() >= 2 && data.location.size() <= 160
+        && data.eventType is string && data.eventType.size() >= 2 && data.eventType.size() <= 80
+        && data.summary is string && data.summary.size() >= 2 && data.summary.size() <= 300
+        && data.description is string && data.description.size() >= 2 && data.description.size() <= 3000
+        && data.coverImage is string && data.coverImage.size() >= 1 && data.coverImage.size() <= 2000
+        && data.mediaItems is list && data.mediaItems.size() <= 12
+        && (data.mediaItems.size() == 0 || (data.mediaItems[0] is map && data.mediaItems[0].url is string && data.mediaItems[0].url.size() <= 2000))
+        && data.published is bool
+        && data.featured is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAvailability(data, dateId) {
+      return data.keys().hasAll(['date', 'status', 'updatedAt'])
+        && data.keys().hasOnly(['date', 'status', 'note', 'updatedAt'])
+        && isValidDateStr(data.date)
+        && data.date == dateId
+        && data.status in ['AVAILABLE', 'LIMITED', 'BOOKED', 'BLOCKED']
+        && (!('note' in data) || (data.note is string && data.note.size() <= 300))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll([
+          'brandName', 'tagline', 'whatsappNumber', 'instagramHandle',
+          'instagramUrl', 'serviceArea', 'heroHeadline', 'heroSubheadline',
+          'aboutStatement', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'brandName', 'tagline', 'whatsappNumber', 'instagramHandle',
+          'instagramUrl', 'whatsappTemplate', 'tiktokUrl', 'youtubeUrl',
+          'email', 'serviceArea', 'heroHeadline',
+          'heroSubheadline', 'aboutStatement', 'bookingNotice', 'updatedAt'
+        ])
+        && data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 80
+        && data.tagline is string && data.tagline.size() >= 1 && data.tagline.size() <= 120
+        && data.whatsappNumber is string && data.whatsappNumber.size() >= 8 && data.whatsappNumber.size() <= 25
+        && data.instagramHandle is string && data.instagramHandle.size() >= 1 && data.instagramHandle.size() <= 80
+        && data.instagramUrl is string && data.instagramUrl.size() >= 1 && data.instagramUrl.size() <= 300
+        && (!('whatsappTemplate' in data) || (data.whatsappTemplate is string && data.whatsappTemplate.size() <= 800))
+        && (!('tiktokUrl' in data) || (data.tiktokUrl is string && data.tiktokUrl.size() <= 300))
+        && (!('youtubeUrl' in data) || (data.youtubeUrl is string && data.youtubeUrl.size() <= 300))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 254))
+        && data.serviceArea is string && data.serviceArea.size() >= 2 && data.serviceArea.size() <= 300
+        && data.heroHeadline is string && data.heroHeadline.size() >= 2 && data.heroHeadline.size() <= 200
+        && data.heroSubheadline is string && data.heroSubheadline.size() >= 2 && data.heroSubheadline.size() <= 500
+        && data.aboutStatement is string && data.aboutStatement.size() >= 2 && data.aboutStatement.size() <= 1200
+        && (!('bookingNotice' in data) || (data.bookingNotice is string && data.bookingNotice.size() <= 500))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCoupleNote(data) {
+      return data.keys().hasAll([
+          'coupleName', 'weddingDetails', 'note',
+          'published', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'coupleName', 'weddingDetails', 'note', 'description',
+          'tag', 'published', 'sortOrder', 'createdAt', 'updatedAt'
+        ])
+        && data.coupleName is string && data.coupleName.size() >= 2 && data.coupleName.size() <= 120
+        && data.weddingDetails is string && data.weddingDetails.size() >= 2 && data.weddingDetails.size() <= 160
+        && data.note is string && data.note.size() >= 2 && data.note.size() <= 1000
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1500))
+        && (!('tag' in data) || (data.tag is string && data.tag.size() <= 60))
+        && data.published is bool
+        && data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFocalPoint(fp) {
+      return fp is map
+        && fp.keys().hasAll(['x', 'y'])
+        && fp.keys().hasOnly(['x', 'y'])
+        && fp.x is number && fp.x >= 0 && fp.x <= 100
+        && fp.y is number && fp.y >= 0 && fp.y <= 100;
+    }
+
+    function isValidHomepageConfig(data) {
+      return data.keys().hasAll([
+          'heroTitle', 'heroSubtitle', 'heroImageUrl', 'heroImagePosition',
+          'heroPrimaryCtaLabel', 'heroSecondaryCtaLabel',
+          'gallerySectionEnabled', 'galleryItems',
+          'aboutHeadline', 'aboutText', 'featuredPortfolioIds',
+          'ctaHeadline', 'ctaButtonLabel', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'heroTitle', 'heroSubtitle', 'heroImageUrl', 'heroImageAlt',
+          'heroImagePosition', 'heroCaption', 'heroPrimaryCtaLabel',
+          'heroSecondaryCtaLabel', 'gallerySectionEnabled', 'galleryItems',
+          'aboutEyebrow', 'aboutHeadline', 'aboutText', 'aboutImageUrl',
+          'aboutImageAlt', 'aboutCtaLabel', 'featuredPortfolioIds',
+          'ctaEyebrow', 'ctaHeadline', 'ctaSubtext', 'ctaButtonLabel',
+          'updatedBy', 'publishedAt', 'updatedAt'
+        ])
+        && data.heroTitle is string && data.heroTitle.size() >= 2 && data.heroTitle.size() <= 200
+        && data.heroSubtitle is string && data.heroSubtitle.size() >= 2 && data.heroSubtitle.size() <= 500
+        && data.heroImageUrl is string && data.heroImageUrl.size() <= 2000
+        && (!('heroImageAlt' in data) || (data.heroImageAlt is string && data.heroImageAlt.size() <= 200))
+        && isValidFocalPoint(data.heroImagePosition)
+        && (!('heroCaption' in data) || (data.heroCaption is string && data.heroCaption.size() <= 200))
+        && data.heroPrimaryCtaLabel is string && data.heroPrimaryCtaLabel.size() >= 1 && data.heroPrimaryCtaLabel.size() <= 80
+        && data.heroSecondaryCtaLabel is string && data.heroSecondaryCtaLabel.size() >= 1 && data.heroSecondaryCtaLabel.size() <= 80
+        && data.gallerySectionEnabled is bool
+        && data.galleryItems is list && data.galleryItems.size() <= 16
+        && (data.galleryItems.size() == 0 || (
+          data.galleryItems[0] is map &&
+          data.galleryItems[0].id is string && data.galleryItems[0].id.size() >= 1 && data.galleryItems[0].id.size() <= 64 &&
+          data.galleryItems[0].url is string && data.galleryItems[0].url.size() >= 1 && data.galleryItems[0].url.size() <= 2000 &&
+          data.galleryItems[0].visible is bool
+        ))
+        && (!('aboutEyebrow' in data) || (data.aboutEyebrow is string && data.aboutEyebrow.size() <= 80))
+        && data.aboutHeadline is string && data.aboutHeadline.size() >= 2 && data.aboutHeadline.size() <= 240
+        && data.aboutText is string && data.aboutText.size() >= 2 && data.aboutText.size() <= 1200
+        && (!('aboutImageUrl' in data) || (data.aboutImageUrl is string && data.aboutImageUrl.size() <= 2000))
+        && (!('aboutImageAlt' in data) || (data.aboutImageAlt is string && data.aboutImageAlt.size() <= 200))
+        && (!('aboutCtaLabel' in data) || (data.aboutCtaLabel is string && data.aboutCtaLabel.size() <= 80))
+        && data.featuredPortfolioIds is list && data.featuredPortfolioIds.size() <= 6
+        && (data.featuredPortfolioIds.size() == 0 || (
+          data.featuredPortfolioIds[0] is string && data.featuredPortfolioIds[0].size() >= 1 && data.featuredPortfolioIds[0].size() <= 128
+        ))
+        && (!('ctaEyebrow' in data) || (data.ctaEyebrow is string && data.ctaEyebrow.size() <= 80))
+        && data.ctaHeadline is string && data.ctaHeadline.size() >= 2 && data.ctaHeadline.size() <= 200
+        && (!('ctaSubtext' in data) || (data.ctaSubtext is string && data.ctaSubtext.size() <= 400))
+        && data.ctaButtonLabel is string && data.ctaButtonLabel.size() >= 1 && data.ctaButtonLabel.size() <= 80
+        && (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 254))
+        && (!('publishedAt' in data) || data.publishedAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInvoice(data) {
+      return data.keys().hasAll([
+          'invoiceNumber', 'sequenceYear', 'sequenceNumber',
+          'bookingId', 'bookingCode', 'lifecycleStatus', 'paymentStatus',
+          'issueDate', 'dueDate', 'clientName', 'clientWhatsapp', 'normalizedWhatsapp',
+          'weddingDate', 'eventLocation', 'eventType',
+          'packageId', 'packageName', 'packagePrice',
+          'additionalItems', 'additionalServicesTotal', 'transportationFee',
+          'overtimeFee', 'discount', 'grandTotal',
+          'dpMode', 'dpPercent', 'downPaymentAmount', 'amountPaid', 'remainingBalance',
+          'payments', 'bankName', 'bankAccountNumber', 'bankAccountHolder',
+          'paymentInstructions', 'thankYouMessage', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'invoiceNumber', 'sequenceYear', 'sequenceNumber',
+          'bookingId', 'bookingCode', 'lifecycleStatus', 'paymentStatus',
+          'issueDate', 'dueDate', 'clientName', 'clientWhatsapp', 'normalizedWhatsapp',
+          'clientEmail', 'weddingDate', 'eventLocation', 'eventType',
+          'packageId', 'packageName', 'packagePrice',
+          'additionalItems', 'additionalServicesTotal', 'transportationFee',
+          'overtimeFee', 'discount', 'grandTotal',
+          'dpMode', 'dpPercent', 'downPaymentAmount', 'amountPaid', 'remainingBalance',
+          'payments', 'bankName', 'bankAccountNumber', 'bankAccountHolder',
+          'paymentInstructions', 'thankYouMessage', 'notes', 'finalizedAt',
+          'createdAt', 'updatedAt'
+        ])
+        && data.invoiceNumber is string && data.invoiceNumber.size() >= 15 && data.invoiceNumber.size() <= 40
+        && data.invoiceNumber.matches('^INV/USC/[0-9]{4}/[0-9]{3,}$')
+        && data.sequenceYear is number && data.sequenceYear >= 2020 && data.sequenceYear <= 2100
+        && data.sequenceNumber is number && data.sequenceNumber >= 1 && data.sequenceNumber <= 999999
+        && isValidId(data.bookingId)
+        && data.bookingCode is string && data.bookingCode.size() >= 1 && data.bookingCode.size() <= 40
+        && data.lifecycleStatus in ['DRAFT', 'FINALIZED', 'VOID']
+        && data.paymentStatus in ['UNPAID', 'PARTIALLY_PAID', 'PAID', 'OVERDUE']
+        && isValidDateStr(data.issueDate)
+        && isValidDateStr(data.dueDate)
+        && data.clientName is string && data.clientName.size() >= 2 && data.clientName.size() <= 120
+        && data.clientWhatsapp is string && data.clientWhatsapp.size() >= 8 && data.clientWhatsapp.size() <= 25
+        && data.normalizedWhatsapp is string && data.normalizedWhatsapp.size() >= 8 && data.normalizedWhatsapp.size() <= 20
+        && data.normalizedWhatsapp.matches('^[0-9]{8,20}$')
+        && (!('clientEmail' in data) || (data.clientEmail is string && data.clientEmail.size() <= 254))
+        && isValidDateStr(data.weddingDate)
+        && data.eventLocation is string && data.eventLocation.size() >= 2 && data.eventLocation.size() <= 180
+        && data.eventType is string && data.eventType.size() >= 2 && data.eventType.size() <= 80
+        && isValidId(data.packageId) && data.packageId.size() <= 64
+        && data.packageName is string && data.packageName.size() >= 1 && data.packageName.size() <= 80
+        && data.packagePrice is number && data.packagePrice >= 0 && data.packagePrice <= 1000000000
+        && data.additionalItems is list && data.additionalItems.size() <= 20
+        && (data.additionalItems.size() == 0 || (
+          data.additionalItems[0] is map &&
+          data.additionalItems[0].id is string && data.additionalItems[0].id.size() >= 1 && data.additionalItems[0].id.size() <= 64 &&
+          data.additionalItems[0].description is string && data.additionalItems[0].description.size() >= 1 && data.additionalItems[0].description.size() <= 160 &&
+          data.additionalItems[0].quantity is number && data.additionalItems[0].quantity >= 1 &&
+          data.additionalItems[0].unitPrice is number && data.additionalItems[0].unitPrice >= 0 &&
+          data.additionalItems[0].amount is number && data.additionalItems[0].amount >= 0
+        ))
+        && data.additionalServicesTotal is number && data.additionalServicesTotal >= 0 && data.additionalServicesTotal <= 1000000000
+        && data.transportationFee is number && data.transportationFee >= 0 && data.transportationFee <= 1000000000
+        && data.overtimeFee is number && data.overtimeFee >= 0 && data.overtimeFee <= 1000000000
+        && data.discount is number && data.discount >= 0 && data.discount <= 1000000000
+        && data.grandTotal is number && data.grandTotal >= 0 && data.grandTotal <= 1000000000
+        && data.dpMode in ['PERCENT_30', 'PERCENT_50', 'CUSTOM_PERCENT', 'CUSTOM_AMOUNT']
+        && data.dpPercent is number && data.dpPercent >= 0 && data.dpPercent <= 100
+        && data.downPaymentAmount is number && data.downPaymentAmount >= 0 && data.downPaymentAmount <= 1000000000
+        && data.amountPaid is number && data.amountPaid >= 0 && data.amountPaid <= 1000000000
+        && data.remainingBalance is number && data.remainingBalance >= 0 && data.remainingBalance <= 1000000000
+        && data.payments is list && data.payments.size() <= 30
+        && (data.payments.size() == 0 || (
+          data.payments[0] is map &&
+          data.payments[0].id is string && data.payments[0].id.size() >= 1 && data.payments[0].id.size() <= 64 &&
+          isValidDateStr(data.payments[0].date) &&
+          data.payments[0].amount is number && data.payments[0].amount > 0 &&
+          data.payments[0].method is string && data.payments[0].method.size() >= 1 && data.payments[0].method.size() <= 60
+        ))
+        && data.bankName is string && data.bankName.size() <= 80
+        && data.bankAccountNumber is string && data.bankAccountNumber.size() <= 60
+        && data.bankAccountHolder is string && data.bankAccountHolder.size() <= 120
+        && data.paymentInstructions is string && data.paymentInstructions.size() <= 600
+        && data.thankYouMessage is string && data.thankYouMessage.size() <= 400
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('finalizedAt' in data) || data.finalizedAt is timestamp)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInvoiceCounter(data, yearId) {
+      return data.keys().hasAll(['year', 'lastNumber', 'updatedAt'])
+        && data.keys().hasOnly(['year', 'lastNumber', 'updatedAt'])
+        && yearId.matches('^[0-9]{4}$')
+        && data.year is number && data.year >= 2020 && data.year <= 2100
+        && data.lastNumber is number && data.lastNumber >= 1 && data.lastNumber <= 999999
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidInvoiceSettings(data) {
+      return data.keys().hasAll([
+          'bankName', 'bankAccountNumber', 'bankAccountHolder',
+          'paymentInstructions', 'defaultThankYouMessage', 'defaultDueDays',
+          'defaultDpMode', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'bankName', 'bankAccountNumber', 'bankAccountHolder',
+          'paymentInstructions', 'defaultThankYouMessage', 'defaultDueDays',
+          'defaultDpMode', 'updatedAt'
+        ])
+        && data.bankName is string && data.bankName.size() <= 80
+        && data.bankAccountNumber is string && data.bankAccountNumber.size() <= 60
+        && data.bankAccountHolder is string && data.bankAccountHolder.size() <= 120
+        && data.paymentInstructions is string && data.paymentInstructions.size() <= 600
+        && data.defaultThankYouMessage is string && data.defaultThankYouMessage.size() <= 400
+        && data.defaultDueDays is number && data.defaultDueDays >= 0 && data.defaultDueDays <= 365
+        && data.defaultDpMode in ['PERCENT_30', 'PERCENT_50']
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll(['action', 'entityType', 'entityId', 'summary', 'actorUid', 'actorEmail', 'createdAt'])
+        && data.keys().hasOnly(['action', 'entityType', 'entityId', 'summary', 'actorUid', 'actorEmail', 'createdAt'])
+        && data.action is string && data.action.size() >= 2 && data.action.size() <= 80
+        && data.entityType in ['BOOKING', 'PORTFOLIO', 'PACKAGE', 'CUSTOMER', 'SETTINGS', 'AVAILABILITY', 'COUPLE_NOTE', 'HOMEPAGE', 'INVOICE']
+        && data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 128
+        && data.summary is string && data.summary.size() >= 2 && data.summary.size() <= 300
+        && data.actorUid is string && data.actorUid == request.auth.uid
+        && data.actorEmail is string && data.actorEmail.size() <= 254
+        && data.createdAt == request.time;
+    }
+
+    // --- Collection Rules ---
+
+    // 1. Users (Admin profiles)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && request.auth.uid == userId));
+      allow list: if isAdmin();
+      allow create: if isValidId(userId)
+        && isAdmin()
+        && isValidUser(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isAdmin()
+        && isValidUser(incoming())
+        && incoming().uid == userId
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'role', 'photoURL', 'updatedAt']);
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    // 2. Bookings (Strict privacy: zero public reads; strictly validated public create)
+    match /bookings/{bookingId} {
+      allow get: if isValidId(bookingId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(bookingId) && (
+        (isAdmin() && isValidBookingShape(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time) ||
+        isValidPublicBookingCreate(incoming(), bookingId)
+      );
+      allow update: if isValidId(bookingId)
+        && isAdmin()
+        && isValidBookingShape(incoming())
+        && incoming().bookingCode == existing().bookingCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'coupleName', 'whatsappNumber', 'normalizedWhatsapp', 'email',
+          'eventDate', 'eventLocation', 'eventType', 'packageId', 'packageName',
+          'packagePrice', 'amountPaid', 'notes', 'status', 'paymentStatus',
+          'customerId', 'updatedAt'
+        ]);
+      allow delete: if isValidId(bookingId) && isAdmin();
+    }
+
+    // 3. Customers (Admin only - strict PII isolation)
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(customerId)
+        && isAdmin()
+        && isValidCustomer(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(customerId)
+        && isAdmin()
+        && isValidCustomer(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'coupleName', 'whatsappNumber', 'normalizedWhatsapp', 'email',
+          'notes', 'totalBookings', 'lastBookingDate', 'updatedAt'
+        ]);
+      allow delete: if isValidId(customerId) && isAdmin();
+    }
+
+    // 4. Packages (Public can read active packages only; Admin manages all)
+    match /packages/{packageId} {
+      allow get: if isValidId(packageId) && (isAdmin() || existing().isActive == true);
+      allow list: if isAdmin() || resource.data.isActive == true;
+      allow create: if isValidId(packageId)
+        && isAdmin()
+        && isValidPackage(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(packageId)
+        && isAdmin()
+        && isValidPackage(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'slug', 'price', 'tagline', 'description',
+          'coverageDetails', 'deliverables', 'additionalNotes',
+          'isActive', 'isFeatured', 'sortOrder', 'updatedAt'
+        ]);
+      allow delete: if isValidId(packageId) && isAdmin();
+    }
+
+    // 5. Portfolio (Public can read published items only; Admin manages all)
+    match /portfolio/{portfolioId} {
+      allow get: if isValidId(portfolioId) && (isAdmin() || existing().published == true);
+      allow list: if isAdmin() || resource.data.published == true;
+      allow create: if isValidId(portfolioId)
+        && isAdmin()
+        && isValidPortfolio(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(portfolioId)
+        && isAdmin()
+        && isValidPortfolio(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'slug', 'coupleName', 'eventDate', 'location', 'eventType',
+          'summary', 'description', 'coverImage', 'mediaItems',
+          'published', 'featured', 'updatedAt'
+        ]);
+      allow delete: if isValidId(portfolioId) && isAdmin();
+    }
+
+    // 6. Availability (Public date status without PII)
+    match /availability/{dateId} {
+      allow get: if isValidDateStr(dateId);
+      allow list: if true;
+      allow create: if isValidDateStr(dateId)
+        && isAdmin()
+        && isValidAvailability(incoming(), dateId)
+        && incoming().updatedAt == request.time;
+      allow update: if isValidDateStr(dateId)
+        && isAdmin()
+        && isValidAvailability(incoming(), dateId)
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'note', 'updatedAt']);
+      allow delete: if isValidDateStr(dateId) && isAdmin();
+    }
+
+    // 7. Settings (Publicly readable settings/public only; Admin writes)
+    match /settings/{settingId} {
+      allow get: if isValidId(settingId) && (settingId == 'public' || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(settingId)
+        && isAdmin()
+        && isValidSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId)
+        && isAdmin()
+        && isValidSettings(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'brandName', 'tagline', 'whatsappNumber', 'instagramHandle',
+          'instagramUrl', 'whatsappTemplate', 'tiktokUrl', 'youtubeUrl',
+          'email', 'serviceArea', 'heroHeadline',
+          'heroSubheadline', 'aboutStatement', 'bookingNotice', 'updatedAt'
+        ]);
+      allow delete: if isValidId(settingId) && isAdmin();
+    }
+
+    // 8. Activity Logs (Admin audit trail, immutable)
+    match /activity_logs/{logId} {
+      allow get: if isValidId(logId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(logId) && isAdmin() && isValidActivityLog(incoming());
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // 9. Couple Notes (Public can read published notes only; Admin manages all)
+    match /couple_notes/{noteId} {
+      allow get: if isValidId(noteId) && (isAdmin() || existing().published == true);
+      allow list: if isAdmin() || resource.data.published == true;
+      allow create: if isValidId(noteId)
+        && isAdmin()
+        && isValidCoupleNote(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(noteId)
+        && isAdmin()
+        && isValidCoupleNote(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'coupleName', 'weddingDetails', 'note', 'description',
+          'tag', 'published', 'sortOrder', 'updatedAt'
+        ]);
+      allow delete: if isValidId(noteId) && isAdmin();
+    }
+
+    // 10. Homepage Customization (Draft is Admin-only; Published is publicly readable)
+    match /homepage_config/{docId} {
+      allow get: if isValidId(docId) && (docId == 'published' || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(docId)
+        && docId in ['draft', 'published']
+        && isAdmin()
+        && isValidHomepageConfig(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId)
+        && docId in ['draft', 'published']
+        && isAdmin()
+        && isValidHomepageConfig(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'heroTitle', 'heroSubtitle', 'heroImageUrl', 'heroImageAlt',
+          'heroImagePosition', 'heroCaption', 'heroPrimaryCtaLabel',
+          'heroSecondaryCtaLabel', 'gallerySectionEnabled', 'galleryItems',
+          'aboutEyebrow', 'aboutHeadline', 'aboutText', 'aboutImageUrl',
+          'aboutImageAlt', 'aboutCtaLabel', 'featuredPortfolioIds',
+          'ctaEyebrow', 'ctaHeadline', 'ctaSubtext', 'ctaButtonLabel',
+          'updatedBy', 'publishedAt', 'updatedAt'
+        ]);
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    // 11. Invoices (Admin-only; Draft editable/deletable, Finalized financial details immutable)
+    match /invoices/{invoiceId} {
+      allow get: if isValidId(invoiceId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(invoiceId)
+        && isAdmin()
+        && isValidInvoice(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(invoiceId)
+        && isAdmin()
+        && isValidInvoice(incoming())
+        && incoming().invoiceNumber == existing().invoiceNumber
+        && incoming().sequenceYear == existing().sequenceYear
+        && incoming().sequenceNumber == existing().sequenceNumber
+        && incoming().bookingId == existing().bookingId
+        && incoming().bookingCode == existing().bookingCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().lifecycleStatus == 'DRAFT' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'lifecycleStatus', 'paymentStatus', 'issueDate', 'dueDate',
+              'clientName', 'clientWhatsapp', 'normalizedWhatsapp', 'clientEmail',
+              'weddingDate', 'eventLocation', 'eventType',
+              'packageId', 'packageName', 'packagePrice',
+              'additionalItems', 'additionalServicesTotal', 'transportationFee',
+              'overtimeFee', 'discount', 'grandTotal',
+              'dpMode', 'dpPercent', 'downPaymentAmount', 'amountPaid', 'remainingBalance',
+              'payments', 'bankName', 'bankAccountNumber', 'bankAccountHolder',
+              'paymentInstructions', 'thankYouMessage', 'notes', 'finalizedAt', 'updatedAt'
+            ])
+          ) ||
+          (
+            existing().lifecycleStatus == 'FINALIZED' &&
+            incoming().lifecycleStatus in ['FINALIZED', 'VOID'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'lifecycleStatus', 'paymentStatus', 'payments', 'amountPaid',
+              'remainingBalance', 'notes', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(invoiceId)
+        && isAdmin()
+        && existing().lifecycleStatus == 'DRAFT';
+    }
+
+    // 12. Invoice Counters (Admin-only atomic yearly sequence)
+    match /invoice_counters/{yearId} {
+      allow get: if isValidId(yearId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(yearId)
+        && isAdmin()
+        && isValidInvoiceCounter(incoming(), yearId)
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(yearId)
+        && isAdmin()
+        && isValidInvoiceCounter(incoming(), yearId)
+        && incoming().year == existing().year
+        && incoming().lastNumber >= existing().lastNumber
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['lastNumber', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // 13. Invoice Settings (Admin-only bank details & default terms)
+    match /invoice_settings/{settingId} {
+      allow get: if isValidId(settingId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(settingId)
+        && settingId == 'default'
+        && isAdmin()
+        && isValidInvoiceSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId)
+        && settingId == 'default'
+        && isAdmin()
+        && isValidInvoiceSettings(incoming())
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'bankName', 'bankAccountNumber', 'bankAccountHolder',
+          'paymentInstructions', 'defaultThankYouMessage', 'defaultDueDays',
+          'defaultDpMode', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "UNSCRIPTED",
+  "description": "Candid wedding content creator serving Semarang, Salatiga, Boyolali, and surrounding areas. REAL MOMENTS. NO RETAKES.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
